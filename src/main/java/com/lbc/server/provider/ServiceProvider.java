@@ -42,6 +42,20 @@ public class ServiceProvider {
         }
     }
 
+    /**
+     * 注销所有已注册的服务（优雅下线时调用）
+     */
+    public void unregisterAll() {
+        InetSocketAddress address = new InetSocketAddress(host, port);
+        for (String interfaceName : interfaceProvider.keySet()) {
+            try {
+                serviceRegister.unregister(interfaceName, address);
+            } catch (Exception e) {
+                // 注销失败不影响其他服务注销
+            }
+        }
+    }
+
     public Object getService(String interfaceName) {
         return interfaceProvider.get(interfaceName);
     }

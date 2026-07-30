@@ -70,6 +70,21 @@ public class ZKServiceRegister implements ServiceRegister {
         }
     }
 
+    // 注销服务地址
+    @Override
+    public void unregister(String serviceName, InetSocketAddress serviceAddress) {
+        try {
+            String path = "/" + serviceName + "/" + getServiceAddress(serviceAddress);
+            // 如果节点存在则删除
+            if (client.checkExists().forPath(path) != null) {
+                client.delete().forPath(path);
+                logger.info("注销服务: {} @ {}", serviceName, getServiceAddress(serviceAddress));
+            }
+        } catch (Exception e) {
+            logger.error("注销服务失败: {} @ {}", serviceName, getServiceAddress(serviceAddress), e);
+        }
+    }
+
     // 地址 -> XXX.XXX.XXX.XXX:port 字符串
     private String getServiceAddress(InetSocketAddress serverAddress) {
         return serverAddress.getHostName() +

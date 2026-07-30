@@ -5,6 +5,7 @@ import com.lbc.common.serializer.myCode.MyEncoder;
 import com.lbc.common.serializer.mySerializer.JsonSerializer;
 import com.lbc.server.netty.handler.NettyRPCServerHandler;
 import com.lbc.server.provider.ServiceProvider;
+import com.lbc.server.server.impl.NettyRPCRPCServer;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 @AllArgsConstructor
 public class NettyServerInitializer extends ChannelInitializer<SocketChannel> {
     private ServiceProvider serviceProvider;
+    private NettyRPCRPCServer server;
 
     @Override
     protected void initChannel(SocketChannel ch) throws Exception {
@@ -29,6 +31,6 @@ public class NettyServerInitializer extends ChannelInitializer<SocketChannel> {
         //使用自定义的编/解码器
         pipeline.addLast(new MyEncoder(new JsonSerializer()));
         pipeline.addLast(new MyDecoder());
-        pipeline.addLast(new NettyRPCServerHandler(serviceProvider));
+        pipeline.addLast(new NettyRPCServerHandler(serviceProvider, server));
     }
 }

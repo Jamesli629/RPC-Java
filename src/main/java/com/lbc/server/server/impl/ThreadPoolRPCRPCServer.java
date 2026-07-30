@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class ThreadPoolRPCRPCServer implements RpcServer {
     private final ThreadPoolExecutor threadPool;
     private ServiceProvider serviceProvider;
+    private volatile boolean running = false;
 
     public ThreadPoolRPCRPCServer(ServiceProvider serviceProvider) {
         // 从配置读取线程池参数
@@ -42,6 +43,7 @@ public class ThreadPoolRPCRPCServer implements RpcServer {
 
     @Override
     public void start(int port) {
+        running = true;
         System.out.println("服务端启动了");
         try {
             ServerSocket serverSocket = new ServerSocket(port);
@@ -56,6 +58,12 @@ public class ThreadPoolRPCRPCServer implements RpcServer {
 
     @Override
     public void stop() {
+        running = false;
+        threadPool.shutdown();
+    }
 
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 }

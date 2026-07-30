@@ -12,9 +12,11 @@ import java.net.Socket;
 @AllArgsConstructor
 public class SimpleRPCRPCServer implements RpcServer {
     private ServiceProvider serviceProvide;
+    private volatile boolean running = false;
 
     @Override
     public void start(int port) {
+        running = true;
         try {
             ServerSocket serverSocket = new ServerSocket(port);
             System.out.println("服务器启动了");
@@ -31,5 +33,11 @@ public class SimpleRPCRPCServer implements RpcServer {
 
     @Override
     public void stop() {
+        running = false;
+    }
+
+    @Override
+    public boolean isRunning() {
+        return running;
     }
 }
