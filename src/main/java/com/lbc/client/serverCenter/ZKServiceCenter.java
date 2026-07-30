@@ -77,13 +77,37 @@ public class ZKServiceCenter implements ServiceCenter {
                 return null;
             }
 
-            // 负载均衡得到地址
-            String address = loadBalance.balance(addressList);
+            // 读取权重（从 ZK 节点数据）
+            List<Integer> weights = getWeights(serviceName, addressList);
+
+            // 负载均衡得到地址（带权重）
+            String address = loadBalance.balance(addressList, weights);
             return parseAddress(address);
         } catch (Exception e) {
             logger.error("服务发现失败，服务名: {}", serviceName, e);
         }
         return null;
+    }
+
+    /**
+     * 读取服务地址对应的权重列表
+     */
+    private List<Integer> getWeights(String serviceName, List<String> addressList) {
+        List<Integer> weights = new java.util.ArrayList<>();
+        for (String addr : addressList) {
+            try {
+                String path = "/" + serviceName + "/" + addr;
+                byte[] data = client.getData().forPath(path);
+                if (data != null && data.length > 0) {
+                    weights.add(Integer.parseInt(new String(data)));
+                } else {
+                    weights.add(1); // 默认权重为 1
+                }
+            } catch (Exception e) {
+                weights.add(1); // 读取失败时默认权重为 1
+            }
+        }
+        return weights;
     }
 
     @Override

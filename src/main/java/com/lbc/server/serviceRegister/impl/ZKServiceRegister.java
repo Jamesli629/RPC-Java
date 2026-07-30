@@ -49,6 +49,12 @@ public class ZKServiceRegister implements ServiceRegister {
     //注册服务到注册中心
     @Override
     public void register(String serviceName, InetSocketAddress serviceAddress, boolean canTry) {
+        register(serviceName, serviceAddress, canTry, 1);
+    }
+
+    //注册服务到注册中心（带权重）
+    @Override
+    public void register(String serviceName, InetSocketAddress serviceAddress, boolean canTry, int weight) {
         try {
             // serviceName创建成永久节点，服务提供者下线时，不删服务名，只删地址
             if (client.checkExists().forPath("/" + serviceName) == null) {
@@ -56,8 +62,14 @@ public class ZKServiceRegister implements ServiceRegister {
             }
             // 路径地址，一个/代表一个节点
             String path = "/" + serviceName + "/" + getServiceAddress(serviceAddress);
-            // 临时节点，服务器下线就删除节点
-            client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL).forPath(path);
+            // 临时节点，服务器下线就删除节点，节点数据保存权重
+            if (client.checkExists().forPath(path) == null) {
+                client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
+                        .forPath(path, String.valueOf(weight).getBytes());
+            } else {
+                // 已存在则更新权重
+                client.setData().forPath(path, String.valueOf(weight).getBytes());
+            }
 
             //如果这个服务是幂等性，就增加到节点中
             if (canTry) {
@@ -66,7 +78,7 @@ public class ZKServiceRegister implements ServiceRegister {
                 client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL).forPath(path);
             }
         } catch (Exception e) {
-            logger.warn("此服务已存在: {}", serviceName);
+            logger.warn("注册服务失败: {}", serviceName, e);
         }
     }
 
