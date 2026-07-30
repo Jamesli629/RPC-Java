@@ -3,6 +3,7 @@ package com.lbc.client.rpcClient.impl;
 import com.lbc.client.netty.nettyInitializer.NettyClientInitializer;
 import com.lbc.client.rpcClient.RpcClient;
 import com.lbc.client.serverCenter.ServiceCenter;
+import com.lbc.common.config.ConfigManager;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
 import io.netty.bootstrap.Bootstrap;
@@ -34,8 +35,9 @@ public class NettyRpcClient implements RpcClient {
 
     private static final EventLoopGroup eventLoopGroup = new NioEventLoopGroup();
 
-    //请求超时时间（秒）
-    private static final int REQUEST_TIMEOUT = 10;
+    //请求超时时间（秒），从配置读取
+    private final int requestTimeout = ConfigManager.getInstance()
+            .getInt("rpc.client.request-timeout-seconds", 10);
 
     private final ServiceCenter serviceCenter;
     //按服务名缓存Channel，同一服务的请求复用同一连接
@@ -103,10 +105,10 @@ public class NettyRpcClient implements RpcClient {
             channel.writeAndFlush(request);
 
             //阻塞等待响应，保持原有同步语义
-            if (!latch.await(REQUEST_TIMEOUT, TimeUnit.SECONDS)) {
+            if (!latch.await(requestTimeout, TimeUnit.SECONDS)) {
                 pendingLatches.remove(channelId);
                 responseMap.remove(channelId);
-                logger.warn("请求超时，channelId={}", channelId);
+                logger.warn("请求超时，channelId={}，超时时间={}s", channelId, requestTimeout);
                 return null;
             }
 

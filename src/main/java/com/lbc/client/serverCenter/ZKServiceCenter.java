@@ -3,6 +3,7 @@ package com.lbc.client.serverCenter;
 import com.lbc.client.cache.ServiceCache;
 import com.lbc.client.serverCenter.balance.impl.ConsistencyHashBalance;
 import com.lbc.client.serverCenter.zkWatcher.WatchZK;
+import com.lbc.common.config.ConfigManager;
 import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -22,26 +23,32 @@ public class ZKServiceCenter implements ServiceCenter {
 
     // curator 提供的zookeeper客户端
     private CuratorFramework client;
-    //zookeeper根路径节点
-    private static final String ROOT_PATH = "MyRPC";
-    private static final String RETRY = "CanRetry";
     //serviceCache
     private ServiceCache cache;
     //负载均衡器（单一实例，通过addNode/delNode增量维护）
     private ConsistencyHashBalance loadBalance;
 
+    private final ConfigManager config = ConfigManager.getInstance();
+
     //负责zookeeper客户端的初始化，并与zookeeper服务端进行连接
     public ZKServiceCenter() throws InterruptedException {
+        // 从配置中读取 ZK 参数
+        String connectString = config.getString("rpc.zk.connect-string", "127.0.0.1:2181");
+        String rootPath = config.getString("rpc.zk.root-path", "MyRPC");
+        int retryBaseSleepMs = config.getInt("rpc.zk.retry-base-sleep-ms", 1000);
+        int retryMaxTimes = config.getInt("rpc.zk.retry-max-times", 3);
+        int sessionTimeoutMs = config.getInt("rpc.zk.session-timeout-ms", 40000);
+
         // 指数时间重试
-        RetryPolicy policy = new ExponentialBackoffRetry(1000, 3);
+        RetryPolicy policy = new ExponentialBackoffRetry(retryBaseSleepMs, retryMaxTimes);
         // zookeeper的地址固定，不管是服务提供者还是，消费者都要与之建立连接
         // sessionTimeoutMs 与 zoo.cfg中的tickTime 有关系，
         // zk还会根据minSessionTimeout与maxSessionTimeout两个参数重新调整最后的超时值。默认分别为tickTime 的2倍和20倍
         // 使用心跳监听状态
-        this.client = CuratorFrameworkFactory.builder().connectString("127.0.0.1:2181")
-                .sessionTimeoutMs(40000).retryPolicy(policy).namespace(ROOT_PATH).build();
+        this.client = CuratorFrameworkFactory.builder().connectString(connectString)
+                .sessionTimeoutMs(sessionTimeoutMs).retryPolicy(policy).namespace(rootPath).build();
         this.client.start();
-        logger.info("zookeeper 连接成功");
+        logger.info("zookeeper 连接成功，地址: {}, 根路径: {}", connectString, rootPath);
 
         //初始化负载均衡器和本地缓存
         loadBalance = new ConsistencyHashBalance();
@@ -49,7 +56,7 @@ public class ZKServiceCenter implements ServiceCenter {
         //加入zookeeper事件监听器
         WatchZK watcher = new WatchZK(client, cache, loadBalance);
         //监听启动
-        watcher.watchToUpdate(ROOT_PATH);
+        watcher.watchToUpdate(rootPath);
     }
 
     //根据服务名（接口名）返回地址
@@ -83,7 +90,8 @@ public class ZKServiceCenter implements ServiceCenter {
     public boolean checkRetry(String serviceName) {
         boolean canRetry = false;
         try {
-            List<String> serviceList = client.getChildren().forPath("/" + RETRY);
+            String retryPath = config.getString("rpc.zk.retry-path", "CanRetry");
+            List<String> serviceList = client.getChildren().forPath("/" + retryPath);
             for (String service : serviceList) {
                 //如果列表中有该服务
                 if (service.equals(serviceName)) {

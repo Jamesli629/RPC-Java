@@ -1,17 +1,18 @@
 package com.lbc.client.serverCenter.balance.impl;
 
 import com.lbc.client.serverCenter.balance.LoadBalance;
+import com.lbc.common.config.ConfigManager;
 
 import java.util.*;
 
 /**
  * @author Lbc
  * @date 2024/09/25 11:41
- * 一致性哈希算法 负载均衡
+ * 一致性哈希算法 负载均衡，虚拟节点数从配置读取
  **/
 public class ConsistencyHashBalance implements LoadBalance {
-    // 虚拟节点的个数
-    private static final int VIRTUAL_NUM = 5;
+    // 虚拟节点的个数，从配置读取
+    private final int virtualNum;
 
     // 虚拟节点分配，key是hash值，value是虚拟节点服务器名称
     private final SortedMap<Integer, String> shards = new TreeMap<>();
@@ -21,10 +22,14 @@ public class ConsistencyHashBalance implements LoadBalance {
 
     //无参构造，节点通过addNode增量添加
     public ConsistencyHashBalance() {
+        this.virtualNum = ConfigManager.getInstance()
+                .getInt("rpc.client.load-balance.virtual-node-count", 5);
     }
 
     //带初始服务列表的构造，一次性构建哈希环
     public ConsistencyHashBalance(List<String> serviceList) {
+        this.virtualNum = ConfigManager.getInstance()
+                .getInt("rpc.client.load-balance.virtual-node-count", 5);
         for (String server : serviceList) {
             addNode(server);
         }
@@ -62,7 +67,7 @@ public class ConsistencyHashBalance implements LoadBalance {
         if (!realNodes.contains(node)) {
             realNodes.add(node);
             System.out.println("真实节点[" + node + "] 上线添加");
-            for (int i = 0; i < VIRTUAL_NUM; i++) {
+            for (int i = 0; i < virtualNum; i++) {
                 String virtualNode = node + "&&VN" + i;
                 int hash = getHash(virtualNode);
                 shards.put(hash, virtualNode);
@@ -82,7 +87,7 @@ public class ConsistencyHashBalance implements LoadBalance {
         if (realNodes.contains(node)) {
             realNodes.remove(node);
             System.out.println("真实节点[" + node + "] 下线移除");
-            for (int i = 0; i < VIRTUAL_NUM; i++) {
+            for (int i = 0; i < virtualNum; i++) {
                 String virtualNode = node + "&&VN" + i;
                 int hash = getHash(virtualNode);
                 shards.remove(hash);

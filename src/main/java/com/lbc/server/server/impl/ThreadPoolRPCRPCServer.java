@@ -1,5 +1,6 @@
 package com.lbc.server.server.impl;
 
+import com.lbc.common.config.ConfigManager;
 import com.lbc.server.provider.ServiceProvider;
 import com.lbc.server.server.RpcServer;
 import com.lbc.server.server.work.WorkThread;
@@ -18,8 +19,14 @@ public class ThreadPoolRPCRPCServer implements RpcServer {
     private ServiceProvider serviceProvider;
 
     public ThreadPoolRPCRPCServer(ServiceProvider serviceProvider) {
+        // 从配置读取线程池参数
+        ConfigManager config = ConfigManager.getInstance();
+        int maxSize = config.getInt("rpc.server.thread-pool.max-size", 1000);
+        long keepAliveSeconds = config.getLong("rpc.server.thread-pool.keep-alive-seconds", 60);
+        int queueCapacity = config.getInt("rpc.server.thread-pool.queue-capacity", 100);
+
         threadPool = new ThreadPoolExecutor(Runtime.getRuntime().availableProcessors(),
-                1000, 60, TimeUnit.SECONDS, new ArrayBlockingQueue<>(100));
+                maxSize, keepAliveSeconds, TimeUnit.SECONDS, new ArrayBlockingQueue<>(queueCapacity));
         this.serviceProvider = serviceProvider;
     }
 
