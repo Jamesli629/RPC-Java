@@ -1,12 +1,10 @@
 package com.lbc.client.proxy;
 
-import com.lbc.client.IOClient;
 import com.lbc.client.circuitBreaker.CircuitBreaker;
 import com.lbc.client.circuitBreaker.CircuitBreakerProvider;
 import com.lbc.client.retry.GuavaRetry;
 import com.lbc.client.rpcClient.RpcClient;
 import com.lbc.client.rpcClient.impl.NettyRpcClient;
-import com.lbc.client.rpcClient.impl.SimpleSocketRpcCilent;
 import com.lbc.client.serverCenter.ServiceCenter;
 import com.lbc.client.serverCenter.ZKServiceCenter;
 import com.lbc.common.message.RpcRequest;
@@ -18,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.concurrent.CompletableFuture;
 
 @AllArgsConstructor
 public class ClientProxy implements InvocationHandler {
@@ -56,24 +55,62 @@ public class ClientProxy implements InvocationHandler {
             //这里可以针对熔断做特殊处理，返回特殊值
             return null;
         }
-        //数据传输
-        RpcResponse response;
-        //后续添加逻辑：为保持幂等性，只对白名单上的服务进行重试
+
+        // 根据方法返回类型选择同步或异步路径
+        if (method.getReturnType() == CompletableFuture.class) {
+            // 异步路径：返回 CompletableFuture<Object>
+            return sendAsync(request, circuitBreaker);
+        } else {
+            // 同步路径（向后兼容）：阻塞获取结果
+            return sendSync(request, circuitBreaker);
+        }
+    }
+
+    /**
+     * 异步发送请求
+     */
+    private CompletableFuture<Object> sendAsync(RpcRequest request, CircuitBreaker circuitBreaker) {
+        CompletableFuture<RpcResponse> future;
         if (serviceCenter.checkRetry(request.getInterfaceName())) {
-            //调用retry框架进行重试操作
+            future = new GuavaRetry().sendServiceWithRetryAsync(request, rpcClient);
+        } else {
+            future = rpcClient.sendRequestAsync(request);
+        }
+        return future.thenApply(response -> {
+            // 上报熔断器状态
+            reportCircuitBreaker(response, circuitBreaker);
+            return response != null ? response.getData() : null;
+        });
+    }
+
+    /**
+     * 同步发送请求（向后兼容）
+     */
+    private Object sendSync(RpcRequest request, CircuitBreaker circuitBreaker) {
+        RpcResponse response;
+        if (serviceCenter.checkRetry(request.getInterfaceName())) {
             response = new GuavaRetry().sendServiceWithRetry(request, rpcClient);
         } else {
-            //只调用一次
             response = rpcClient.sendRequest(request);
         }
         //记录response的状态，上报给熔断器
+        reportCircuitBreaker(response, circuitBreaker);
+        return response != null ? response.getData() : null;
+    }
+
+    /**
+     * 上报熔断器状态
+     */
+    private void reportCircuitBreaker(RpcResponse response, CircuitBreaker circuitBreaker) {
+        if (response == null) {
+            return;
+        }
         if (response.getCode() == 200) {
             circuitBreaker.recordSuccess();
         }
         if (response.getCode() == 500) {
             circuitBreaker.recordFailure();
         }
-        return response.getData();
     }
 
     public <T> T getProxy(Class<T> clazz) {

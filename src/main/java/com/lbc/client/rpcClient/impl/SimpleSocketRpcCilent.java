@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.Socket;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * @author Lbc
@@ -38,5 +39,11 @@ public class SimpleSocketRpcCilent implements RpcClient {
             e.printStackTrace();
             return null;
         }
+    }
+
+    @Override
+    public CompletableFuture<RpcResponse> sendRequestAsync(RpcRequest request) {
+        // 简单实现：同步调用包装为 CompletableFuture
+        return CompletableFuture.completedFuture(sendRequest(request));
     }
 }

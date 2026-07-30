@@ -16,16 +16,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * @author Lbc
  * @date 2024/09/16 15:39
  *
- * 基于连接复用的Netty RPC客户端，避免每次请求新建TCP连接。
+ * 基于连接复用的Netty RPC客户端，支持同步和异步两种调用模式。
  * 通过channelId匹配请求与响应，支持同一连接上的并发请求。
  * 按服务名缓存Channel，同一服务的请求复用同一连接。
  **/
@@ -42,12 +40,18 @@ public class NettyRpcClient implements RpcClient {
     private final ServiceCenter serviceCenter;
     //按服务名缓存Channel，同一服务的请求复用同一连接
     private final ConcurrentHashMap<String, Channel> channelCache = new ConcurrentHashMap<>();
-    //等待响应的Latch映射：channelId -> CountDownLatch
-    private final ConcurrentHashMap<Integer, CountDownLatch> pendingLatches = new ConcurrentHashMap<>();
-    //接收到的响应映射：channelId -> RpcResponse
-    private final ConcurrentHashMap<Integer, RpcResponse> responseMap = new ConcurrentHashMap<>();
+    //等待响应的Future映射：channelId -> CompletableFuture
+    private final ConcurrentHashMap<Integer, CompletableFuture<RpcResponse>> pendingFutures
+            = new ConcurrentHashMap<>();
     //请求ID生成器
     private final AtomicInteger requestIdGenerator = new AtomicInteger(0);
+    //超时调度器
+    private final ScheduledExecutorService timeoutScheduler =
+            Executors.newScheduledThreadPool(1, r -> {
+                Thread t = new Thread(r, "rpc-timeout-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
 
     public NettyRpcClient(ServiceCenter serviceCenter) {
         this.serviceCenter = serviceCenter;
@@ -87,50 +91,63 @@ public class NettyRpcClient implements RpcClient {
         }
     }
 
+    /**
+     * 同步发送请求（向后兼容）
+     * 内部委托给异步方法，通过 join() 阻塞等待结果
+     */
     @Override
     public RpcResponse sendRequest(RpcRequest request) {
-        //生成唯一请求ID（在try外声明，使catch块可访问用于日志）
-        int channelId = requestIdGenerator.incrementAndGet();
-        request.setChannelId(channelId);
         try {
-
-            //获取或创建该服务对应的Channel（连接复用）
-            Channel channel = getOrCreateChannel(request.getInterfaceName());
-
-            //创建CountDownLatch并注册到pendingLatches
-            CountDownLatch latch = new CountDownLatch(1);
-            pendingLatches.put(channelId, latch);
-
-            //写出请求（不关闭通道，支持连接复用）
-            channel.writeAndFlush(request);
-
-            //阻塞等待响应，保持原有同步语义
-            if (!latch.await(requestTimeout, TimeUnit.SECONDS)) {
-                pendingLatches.remove(channelId);
-                responseMap.remove(channelId);
-                logger.warn("请求超时，channelId={}，超时时间={}s", channelId, requestTimeout);
-                return null;
-            }
-
-            RpcResponse response = responseMap.remove(channelId);
-            logger.debug("收到响应: {}", response);
-            return response;
+            return sendRequestAsync(request).join();
         } catch (Exception e) {
-            logger.error("发送请求失败，channelId={}", channelId, e);
+            logger.error("同步发送请求失败，channelId={}", request.getChannelId(), e);
             return null;
         }
     }
 
     /**
-     * NettyClientHandler收到响应时调用，根据channelId找到对应的Latch并计数释放。
+     * 异步发送请求（立即返回 Future，不阻塞调用线程）
+     */
+    @Override
+    public CompletableFuture<RpcResponse> sendRequestAsync(RpcRequest request) {
+        int channelId = requestIdGenerator.incrementAndGet();
+        request.setChannelId(channelId);
+
+        CompletableFuture<RpcResponse> future = new CompletableFuture<>();
+        pendingFutures.put(channelId, future);
+
+        // 设置超时
+        ScheduledFuture<?> timeoutTask = timeoutScheduler.schedule(() -> {
+            pendingFutures.remove(channelId);
+            future.completeExceptionally(
+                new TimeoutException("请求超时, channelId=" + channelId));
+        }, requestTimeout, TimeUnit.SECONDS);
+
+        try {
+            Channel channel = getOrCreateChannel(request.getInterfaceName());
+            channel.writeAndFlush(request).addListener(f -> {
+                if (!f.isSuccess()) {
+                    pendingFutures.remove(channelId);
+                    future.completeExceptionally(f.cause());
+                }
+            });
+        } catch (Exception e) {
+            pendingFutures.remove(channelId);
+            future.completeExceptionally(e);
+        }
+
+        // 响应到达或异常时取消超时任务
+        return future.whenComplete((resp, err) -> timeoutTask.cancel(false));
+    }
+
+    /**
+     * NettyClientHandler收到响应时调用，根据channelId找到对应的Future并完成。
      */
     public void handleResponse(RpcResponse response) {
         int channelId = response.getChannelId();
-        //先放入responseMap，再释放latch，避免getNow时race
-        responseMap.put(channelId, response);
-        CountDownLatch latch = pendingLatches.remove(channelId);
-        if (latch != null) {
-            latch.countDown();
+        CompletableFuture<RpcResponse> future = pendingFutures.remove(channelId);
+        if (future != null) {
+            future.complete(response);
         }
     }
 
@@ -140,7 +157,10 @@ public class NettyRpcClient implements RpcClient {
     public void handleChannelInactive(String serviceName) {
         //从缓存中移除不活跃的连接，下次请求会重建
         channelCache.remove(serviceName);
-        //注意：此处无法精确知道哪些channelId在该channel上，
-        //但客户端会因连接断开收到exceptionCaught，由handler处理单个请求的失败
+        //释放所有等待中的 Future，避免永久阻塞直到超时
+        pendingFutures.forEach((id, future) -> {
+            future.completeExceptionally(new RuntimeException("连接已断开: " + serviceName));
+        });
+        pendingFutures.clear();
     }
 }

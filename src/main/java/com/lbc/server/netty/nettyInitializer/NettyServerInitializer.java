@@ -8,12 +8,10 @@ import com.lbc.server.provider.ServiceProvider;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
-import io.netty.handler.codec.LengthFieldPrepender;
-import io.netty.handler.codec.serialization.ClassResolver;
-import io.netty.handler.codec.serialization.ObjectDecoder;
-import io.netty.handler.codec.serialization.ObjectEncoder;
+import io.netty.handler.timeout.IdleStateHandler;
 import lombok.AllArgsConstructor;
+
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author Lbc
@@ -26,6 +24,8 @@ public class NettyServerInitializer extends ChannelInitializer<SocketChannel> {
     @Override
     protected void initChannel(SocketChannel ch) throws Exception {
         ChannelPipeline pipeline = ch.pipeline();
+        // 30秒无读事件触发空闲检测（连接复用场景下清理僵尸连接）
+        pipeline.addLast(new IdleStateHandler(30, 0, 0, TimeUnit.SECONDS));
         //使用自定义的编/解码器
         pipeline.addLast(new MyEncoder(new JsonSerializer()));
         pipeline.addLast(new MyDecoder());
