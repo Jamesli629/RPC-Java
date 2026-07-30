@@ -31,18 +31,22 @@ public class ServiceProvider {
     }
 
     public void provideServiceInterface(Object service, boolean canRetry) {
-        provideServiceInterface(service, canRetry, 1);
+        provideServiceInterface(service, canRetry, 1, "default", "default");
     }
 
     public void provideServiceInterface(Object service, boolean canRetry, int weight) {
+        provideServiceInterface(service, canRetry, weight, "default", "default");
+    }
+
+    public void provideServiceInterface(Object service, boolean canRetry, int weight, String version, String group) {
         String serviceName = service.getClass().getName();
         Class<?>[] interfaceName = service.getClass().getInterfaces();
 
         for (Class<?> clazz : interfaceName) {
             //本机的映射表
             interfaceProvider.put(clazz.getName(), service);
-            //在注册中心注册服务（带权重）
-            serviceRegister.register(clazz.getName(), new InetSocketAddress(host, port), canRetry, weight);
+            //在注册中心注册服务（带权重、版本、分组）
+            serviceRegister.register(clazz.getName(), new InetSocketAddress(host, port), canRetry, weight, version, group);
         }
     }
 

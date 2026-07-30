@@ -15,6 +15,9 @@ import java.net.InetSocketAddress;
 /**
  * @author Lbc
  * @date 2024/09/16 16:23
+ *
+ * ZK 服务注册，支持版本/分组
+ * 路径结构: /MyRPC/{serviceName}/{version}/{group}/{address}
  **/
 public class ZKServiceRegister implements ServiceRegister {
 
@@ -36,10 +39,6 @@ public class ZKServiceRegister implements ServiceRegister {
 
         // 指数时间重试
         RetryPolicy policy = new ExponentialBackoffRetry(retryBaseSleepMs, retryMaxTimes);
-        // zookeeper的地址固定，不管是服务提供者还是，消费者都要与之建立连接
-        // sessionTimeoutMs 与 zoo.cfg中的tickTime 有关系，
-        // zk还会根据minSessionTimeout与maxSessionTimeout两个参数重新调整最后的超时值。默认分别为tickTime 的2倍和20倍
-        // 使用心跳监听状态
         this.client = CuratorFrameworkFactory.builder().connectString(connectString)
                 .sessionTimeoutMs(sessionTimeoutMs).retryPolicy(policy).namespace(rootPath).build();
         this.client.start();
@@ -49,34 +48,55 @@ public class ZKServiceRegister implements ServiceRegister {
     //注册服务到注册中心
     @Override
     public void register(String serviceName, InetSocketAddress serviceAddress, boolean canTry) {
-        register(serviceName, serviceAddress, canTry, 1);
+        register(serviceName, serviceAddress, canTry, 1, "default", "default");
     }
 
     //注册服务到注册中心（带权重）
     @Override
     public void register(String serviceName, InetSocketAddress serviceAddress, boolean canTry, int weight) {
+        register(serviceName, serviceAddress, canTry, weight, "default", "default");
+    }
+
+    //注册服务到注册中心（带权重、版本、分组）
+    @Override
+    public void register(String serviceName, InetSocketAddress serviceAddress, boolean canTry,
+                         int weight, String version, String group) {
         try {
-            // serviceName创建成永久节点，服务提供者下线时，不删服务名，只删地址
-            if (client.checkExists().forPath("/" + serviceName) == null) {
-                client.create().creatingParentsIfNeeded().withMode(CreateMode.PERSISTENT).forPath("/" + serviceName);
+            // 构建路径: /{serviceName}/{version}/{group}/{address}
+            String servicePath = "/" + serviceName;
+            String versionPath = servicePath + "/" + version;
+            String groupPath = versionPath + "/" + group;
+            String addressPath = groupPath + "/" + getServiceAddress(serviceAddress);
+
+            // 创建永久节点（服务名、版本、分组）
+            if (client.checkExists().forPath(servicePath) == null) {
+                client.create().creatingParentsIfNeeded().withMode(CreateMode.PERSISTENT).forPath(servicePath);
             }
-            // 路径地址，一个/代表一个节点
-            String path = "/" + serviceName + "/" + getServiceAddress(serviceAddress);
-            // 临时节点，服务器下线就删除节点，节点数据保存权重
-            if (client.checkExists().forPath(path) == null) {
+            if (client.checkExists().forPath(versionPath) == null) {
+                client.create().creatingParentsIfNeeded().withMode(CreateMode.PERSISTENT).forPath(versionPath);
+            }
+            if (client.checkExists().forPath(groupPath) == null) {
+                client.create().creatingParentsIfNeeded().withMode(CreateMode.PERSISTENT).forPath(groupPath);
+            }
+
+            // 临时节点（地址），节点数据保存权重
+            if (client.checkExists().forPath(addressPath) == null) {
                 client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL)
-                        .forPath(path, String.valueOf(weight).getBytes());
+                        .forPath(addressPath, String.valueOf(weight).getBytes());
             } else {
-                // 已存在则更新权重
-                client.setData().forPath(path, String.valueOf(weight).getBytes());
+                client.setData().forPath(addressPath, String.valueOf(weight).getBytes());
             }
 
             //如果这个服务是幂等性，就增加到节点中
             if (canTry) {
                 String retryPath = config.getString("rpc.zk.retry-path", "CanRetry");
-                path = "/" + retryPath + "/" + serviceName;
-                client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL).forPath(path);
+                String retryNode = "/" + retryPath + "/" + serviceName;
+                if (client.checkExists().forPath(retryNode) == null) {
+                    client.create().creatingParentsIfNeeded().withMode(CreateMode.EPHEMERAL).forPath(retryNode);
+                }
             }
+            logger.info("注册服务: {} v{} group:{} @ {} weight:{}", serviceName, version, group,
+                    getServiceAddress(serviceAddress), weight);
         } catch (Exception e) {
             logger.warn("注册服务失败: {}", serviceName, e);
         }
@@ -85,12 +105,23 @@ public class ZKServiceRegister implements ServiceRegister {
     // 注销服务地址
     @Override
     public void unregister(String serviceName, InetSocketAddress serviceAddress) {
+        // 注销所有版本/分组下的该地址
         try {
-            String path = "/" + serviceName + "/" + getServiceAddress(serviceAddress);
-            // 如果节点存在则删除
-            if (client.checkExists().forPath(path) != null) {
-                client.delete().forPath(path);
-                logger.info("注销服务: {} @ {}", serviceName, getServiceAddress(serviceAddress));
+            String servicePath = "/" + serviceName;
+            if (client.checkExists().forPath(servicePath) == null) return;
+
+            // 遍历所有版本
+            for (String version : client.getChildren().forPath(servicePath)) {
+                String versionPath = servicePath + "/" + version;
+                // 遍历所有分组
+                for (String group : client.getChildren().forPath(versionPath)) {
+                    String addressPath = versionPath + "/" + group + "/" + getServiceAddress(serviceAddress);
+                    if (client.checkExists().forPath(addressPath) != null) {
+                        client.delete().forPath(addressPath);
+                        logger.info("注销服务: {} v{} group:{} @ {}", serviceName, version, group,
+                                getServiceAddress(serviceAddress));
+                    }
+                }
             }
         } catch (Exception e) {
             logger.error("注销服务失败: {} @ {}", serviceName, getServiceAddress(serviceAddress), e);

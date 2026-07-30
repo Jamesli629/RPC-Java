@@ -29,4 +29,8 @@ public class RpcRequest implements Serializable {
     private Object[] params;
     //参数类型
     private Class<?>[] paramsType;
+    //服务版本（用于灰度发布、AB测试），为空则使用默认版本
+    private String version;
+    //服务分组（用于流量隔离），为空则使用默认分组
+    private String group;
 }

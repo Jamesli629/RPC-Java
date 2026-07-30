@@ -12,11 +12,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * @author Lbc
  * @date 2024/09/16 16:16
+ *
+ * 支持版本/分组的服务发现
  **/
 public class ZKServiceCenter implements ServiceCenter {
     private static final Logger logger = LoggerFactory.getLogger(ZKServiceCenter.class);
@@ -41,10 +44,6 @@ public class ZKServiceCenter implements ServiceCenter {
 
         // 指数时间重试
         RetryPolicy policy = new ExponentialBackoffRetry(retryBaseSleepMs, retryMaxTimes);
-        // zookeeper的地址固定，不管是服务提供者还是，消费者都要与之建立连接
-        // sessionTimeoutMs 与 zoo.cfg中的tickTime 有关系，
-        // zk还会根据minSessionTimeout与maxSessionTimeout两个参数重新调整最后的超时值。默认分别为tickTime 的2倍和20倍
-        // 使用心跳监听状态
         this.client = CuratorFrameworkFactory.builder().connectString(connectString)
                 .sessionTimeoutMs(sessionTimeoutMs).retryPolicy(policy).namespace(rootPath).build();
         this.client.start();
@@ -62,29 +61,38 @@ public class ZKServiceCenter implements ServiceCenter {
     //根据服务名（接口名）返回地址
     @Override
     public InetSocketAddress serviceDiscovery(String serviceName) {
+        return serviceDiscovery(serviceName, "default", "default");
+    }
+
+    //根据服务名、版本、分组返回地址
+    @Override
+    public InetSocketAddress serviceDiscovery(String serviceName, String version, String group) {
         try {
-            //先从本地缓存中找
-            List<String> addressList = cache.getServiceFromCache(serviceName);
+            // 构建路径: /{serviceName}/{version}/{group}
+            String path = "/" + serviceName + "/" + version + "/" + group;
+
+            //先从本地缓存中找（使用复合key）
+            String cacheKey = serviceName + ":" + version + ":" + group;
+            List<String> addressList = cache.getServiceFromCache(cacheKey);
             //如果找不到，再去zookeeper中找
-            //这种情况基本不会发生，或者说只会出现在初始化阶段
             if (addressList == null) {
-                addressList = client.getChildren().forPath("/" + serviceName);
+                addressList = client.getChildren().forPath(path);
             }
 
             //防护：服务不存在或地址列表为空
             if (addressList == null || addressList.isEmpty()) {
-                logger.warn("服务{}没有可用的服务地址", serviceName);
+                logger.warn("服务{} v{} group:{} 没有可用的服务地址", serviceName, version, group);
                 return null;
             }
 
             // 读取权重（从 ZK 节点数据）
-            List<Integer> weights = getWeights(serviceName, addressList);
+            List<Integer> weights = getWeights(path, addressList);
 
             // 负载均衡得到地址（带权重）
             String address = loadBalance.balance(addressList, weights);
             return parseAddress(address);
         } catch (Exception e) {
-            logger.error("服务发现失败，服务名: {}", serviceName, e);
+            logger.error("服务发现失败，服务名: {}, 版本: {}, 分组: {}", serviceName, version, group, e);
         }
         return null;
     }
@@ -92,11 +100,11 @@ public class ZKServiceCenter implements ServiceCenter {
     /**
      * 读取服务地址对应的权重列表
      */
-    private List<Integer> getWeights(String serviceName, List<String> addressList) {
-        List<Integer> weights = new java.util.ArrayList<>();
+    private List<Integer> getWeights(String basePath, List<String> addressList) {
+        List<Integer> weights = new ArrayList<>();
         for (String addr : addressList) {
             try {
-                String path = "/" + serviceName + "/" + addr;
+                String path = basePath + "/" + addr;
                 byte[] data = client.getData().forPath(path);
                 if (data != null && data.length > 0) {
                     weights.add(Integer.parseInt(new String(data)));
