@@ -1,0 +1,2 @@
+com.lbc.common.serializer.mySerializer.ObjectSerializer
+com.lbc.common.serializer.mySerializer.JsonSerializer

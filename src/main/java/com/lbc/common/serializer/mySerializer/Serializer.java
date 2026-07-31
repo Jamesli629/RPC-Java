@@ -1,5 +1,9 @@
 package com.lbc.common.serializer.mySerializer;
 
+import com.lbc.common.spi.SpiLoader;
+
+import java.util.Map;
+
 public interface Serializer {
     // 把对象序列化成字节数组
     byte[] serialize(Object obj);
@@ -11,6 +15,14 @@ public interface Serializer {
     int getType();
     // 根据序号取出序列化器，暂时有两种实现方式，需要其它方式，实现这个接口即可
     static Serializer getSerializerByCode(int code){
+        // 优先从 SPI 加载（支持扩展）
+        Map<String, Serializer> spiImpls = SpiLoader.load(Serializer.class);
+        for (Serializer impl : spiImpls.values()) {
+            if (impl.getType() == code) {
+                return impl;
+            }
+        }
+        // 兜底：内置实现
         switch (code){
             case 0:
                 return new ObjectSerializer();
