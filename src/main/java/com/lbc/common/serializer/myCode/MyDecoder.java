@@ -1,5 +1,6 @@
 package com.lbc.common.serializer.myCode;
 
+import com.lbc.common.config.ConfigManager;
 import com.lbc.common.message.MessageType;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
@@ -11,16 +12,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.zip.CRC32;
 
 /**
  * @author Lbc
  * @date 2024/09/21 10:18
  *
- * 协议帧格式（16 字节头）：
- * magicNumber(2) + version(2) + messageType(2) + serializerType(2) + length(4) + channelId(4)
+ * 协议帧格式（20 字节头 + payload + CRC）：
+ * magicNumber(2) + version(2) + messageType(2) + serializerType(2) + length(4) + channelId(4) + payload(length) + crc32(4)
  **/
 public class MyDecoder extends ByteToMessageDecoder {
     private static final Logger logger = LoggerFactory.getLogger(MyDecoder.class);
+
+    private static final boolean CRC_ENABLED = ConfigManager.getInstance()
+            .getBoolean("rpc.protocol.crc.enabled", true);
 
     @Override
     protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf in, List<Object> out) throws Exception {
@@ -80,6 +85,26 @@ public class MyDecoder extends ByteToMessageDecoder {
 
         byte[] bytes = new byte[length];
         in.readBytes(bytes);
+
+        // CRC32 校验（可选）
+        if (CRC_ENABLED) {
+            if (in.readableBytes() < ProtocolConstants.CRC_SIZE) {
+                in.resetReaderIndex();
+                return;
+            }
+            int receivedCrc = in.readInt();
+            CRC32 crc32 = new CRC32();
+            crc32.update(bytes);
+            int expectedCrc = (int) crc32.getValue();
+            if (receivedCrc != expectedCrc) {
+                logger.warn("CRC 校验失败: 收到=0x{}, 期望=0x{}, 远程地址: {}",
+                        Integer.toHexString(receivedCrc),
+                        Integer.toHexString(expectedCrc),
+                        channelHandlerContext.channel().remoteAddress());
+                return;
+            }
+        }
+
         Object deserialize = serializer.deserialize(bytes, messageType);
 
         // 将channelId设置到反序列化后的对象上，用于连接池中匹配请求与响应

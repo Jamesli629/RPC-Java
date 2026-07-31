@@ -16,8 +16,14 @@ public class ProtocolConstants {
     /** 支持的最大协议版本 */
     public static final short MAX_PROTOCOL_VERSION = 0x0001;
 
-    /** 帧头总长度（字节） */
-    public static final int HEADER_LENGTH = 16;
+    /** 帧头总长度（字节），不含 CRC */
+    public static final int HEADER_SIZE = 16;
+
+    /** CRC32 校验和长度（字节） */
+    public static final int CRC_SIZE = 4;
+
+    /** 完整帧头长度（含 CRC） */
+    public static final int HEADER_LENGTH = HEADER_SIZE + CRC_SIZE;
 
     private ProtocolConstants() {
     }

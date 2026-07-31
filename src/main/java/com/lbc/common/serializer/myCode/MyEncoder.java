@@ -1,5 +1,6 @@
 package com.lbc.common.serializer.myCode;
 
+import com.lbc.common.config.ConfigManager;
 import com.lbc.common.message.MessageType;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
@@ -9,13 +10,21 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.MessageToByteEncoder;
 import lombok.AllArgsConstructor;
 
+import java.util.zip.CRC32;
+
 /**
  * @author Lbc
  * @date 2024/09/21 10:17
+ *
+ * 协议编码器，支持可选的 CRC32 校验和
  **/
 @AllArgsConstructor
 public class MyEncoder extends MessageToByteEncoder {
     private Serializer serializer;
+
+    private static final boolean CRC_ENABLED = ConfigManager.getInstance()
+            .getBoolean("rpc.protocol.crc.enabled", true);
+
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, ByteBuf out) throws Exception {
         //1.写入 Magic Number（协议起始标识）
@@ -43,7 +52,13 @@ public class MyEncoder extends MessageToByteEncoder {
             channelId = ((RpcResponse) msg).getChannelId();
         }
         out.writeInt(channelId);
-        //5.写入序列化数组
+        //7.写入序列化数组
         out.writeBytes(serializeBytes);
+        //8.写入 CRC32 校验和（可选）
+        if (CRC_ENABLED) {
+            CRC32 crc32 = new CRC32();
+            crc32.update(serializeBytes);
+            out.writeInt((int) crc32.getValue());
+        }
     }
 }
