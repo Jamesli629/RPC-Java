@@ -2,6 +2,7 @@ package com.lbc.server.netty.handler;
 
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
+import com.lbc.common.metrics.RpcMetrics;
 import com.lbc.server.provider.ServiceProvider;
 import com.lbc.server.rateLimit.RateLimit;
 import com.lbc.server.server.impl.NettyRPCRPCServer;
@@ -46,15 +47,39 @@ public class NettyRPCServerHandler extends SimpleChannelInboundHandler<RpcReques
 
         // 请求开始计数
         server.onRequestStart();
+        long startTime = System.currentTimeMillis();
 
         try {
             //接收request，读取并调用服务
             RpcResponse response = getResponse(request);
             // 不复用连接时不关闭通道，支持连接复用
             ctx.writeAndFlush(response);
+
+            // 记录调用日志和指标
+            long duration = System.currentTimeMillis() - startTime;
+            logInvocation(request, response, duration, ctx);
+            RpcMetrics.recordServerRequest(request.getInterfaceName(), request.getMethodName(),
+                    duration, response.getCode() == 200);
         } finally {
             // 请求结束计数
             server.onRequestEnd();
+        }
+    }
+
+    /**
+     * 记录调用日志：接口、方法、耗时、调用方地址、结果
+     */
+    private void logInvocation(RpcRequest request, RpcResponse response, long duration,
+                                ChannelHandlerContext ctx) {
+        String remoteAddr = ctx.channel().remoteAddress() != null
+                ? ctx.channel().remoteAddress().toString() : "unknown";
+        if (response.getCode() == 200) {
+            logger.info("调用成功: {}.{} | 耗时: {}ms | 调用方: {}",
+                    request.getInterfaceName(), request.getMethodName(), duration, remoteAddr);
+        } else {
+            logger.warn("调用失败: {}.{} | code={} | 耗时: {}ms | 调用方: {} | {}",
+                    request.getInterfaceName(), request.getMethodName(),
+                    response.getCode(), duration, remoteAddr, response.getMessage());
         }
     }
 

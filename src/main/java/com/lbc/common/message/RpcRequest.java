@@ -21,6 +21,10 @@ public class RpcRequest implements Serializable {
     private int channelId;
     /** 链路追踪 ID，贯穿整条调用链，用于 ELK/SkyWalking 关联 */
     private String traceId;
+    /** 请求发送时间戳（毫秒），用于计算 RT */
+    private long timestamp = System.currentTimeMillis();
+    /** 幂等键，用于重试去重 */
+    private String idempotencyKey;
     /** 服务类名，客户端只知道接口 */
     private String interfaceName;
     /** 调用的方法名 */

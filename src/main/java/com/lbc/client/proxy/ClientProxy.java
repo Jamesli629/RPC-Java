@@ -9,6 +9,7 @@ import com.lbc.client.serverCenter.ServiceCenter;
 import com.lbc.client.serverCenter.ZKServiceCenter;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
+import com.lbc.common.metrics.RpcMetrics;
 import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,7 +80,14 @@ public class ClientProxy implements InvocationHandler {
         return future.thenApply(response -> {
             // 上报熔断器状态
             reportCircuitBreaker(response, circuitBreaker);
+            // 记录客户端指标
+            recordClientMetrics(request, response, "success");
             return response != null ? response.getData() : null;
+        }).exceptionally(e -> {
+            // 记录客户端异常指标
+            recordClientMetrics(request, null, "error");
+            logger.error("异步调用异常: {}.{}", request.getInterfaceName(), request.getMethodName(), e);
+            return null;
         });
     }
 
@@ -95,7 +103,28 @@ public class ClientProxy implements InvocationHandler {
         }
         //记录response的状态，上报给熔断器
         reportCircuitBreaker(response, circuitBreaker);
+        // 记录客户端指标
+        recordClientMetrics(request, response, response != null && response.getCode() == 200 ? "success" : "error");
         return response != null ? response.getData() : null;
+    }
+
+    /**
+     * 记录客户端调用指标和日志
+     */
+    private void recordClientMetrics(RpcRequest request, RpcResponse response, String result) {
+        long duration = System.currentTimeMillis() - request.getTimestamp();
+        RpcMetrics.recordClientRequest(request.getInterfaceName(), request.getMethodName(),
+                duration, result);
+        if ("success".equals(result)) {
+            logger.info("客户端调用成功: {}.{} | 耗时: {}ms",
+                    request.getInterfaceName(), request.getMethodName(), duration);
+        } else if ("timeout".equals(result)) {
+            logger.warn("客户端调用超时: {}.{} | 耗时: {}ms",
+                    request.getInterfaceName(), request.getMethodName(), duration);
+        } else {
+            logger.warn("客户端调用失败: {}.{} | 耗时: {}ms",
+                    request.getInterfaceName(), request.getMethodName(), duration);
+        }
     }
 
     /**

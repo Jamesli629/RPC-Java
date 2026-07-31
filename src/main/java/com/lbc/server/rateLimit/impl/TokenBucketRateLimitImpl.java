@@ -1,10 +1,13 @@
 package com.lbc.server.rateLimit.impl;
 
+import com.lbc.common.metrics.RpcMetrics;
 import com.lbc.server.rateLimit.RateLimit;
 
 /**
  * @author Lbc
  * @date 2024/10/11 22:27
+ *
+ * 令牌桶限流实现，限流拒绝时记录 Metrics 指标
  **/
 public class TokenBucketRateLimitImpl implements RateLimit {
 
@@ -47,7 +50,8 @@ public class TokenBucketRateLimitImpl implements RateLimit {
             timeStamp = current;
             return true;
         }
-        //获得不到，返回false
+        //获得不到，返回false，记录限流拒绝指标
+        RpcMetrics.recordRateLimitReject("unknown");
         return false;
     }
 }
