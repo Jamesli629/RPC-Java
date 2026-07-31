@@ -15,11 +15,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class RoundLoadBalance implements LoadBalance {
     private static final Logger logger = LoggerFactory.getLogger(RoundLoadBalance.class);
 
-    private final AtomicInteger choose = new AtomicInteger(-1);
+    private final AtomicInteger choose = new AtomicInteger(0);
 
     @Override
     public String balance(List<String> addressList) {
-        int index = Math.abs(choose.getAndIncrement() % addressList.size());
+        int index = choose.getAndIncrement() % addressList.size();
+        if (index < 0) {
+            index += addressList.size(); // 防止溢出变负数
+        }
         logger.debug("轮询负载均衡选择了第 {} 个服务器: {}", index, addressList.get(index));
         return addressList.get(index);
     }

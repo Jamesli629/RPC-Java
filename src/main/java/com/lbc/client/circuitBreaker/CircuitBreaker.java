@@ -68,9 +68,9 @@ public class CircuitBreaker {
         long currentTime = System.currentTimeMillis();
         switch (state) {
             case OPEN:
-                if (currentTime - lastFailureTime > retryTimePeriod) {
+                if (currentTime - lastFailureTime >= retryTimePeriod) {
                     state = CircuitBreakerState.HALF_OPEN;
-                    halfOpenRequests.set(0);
+                    halfOpenRequests.set(1); // 当前这个请求算第 1 个探测请求
                     halfOpenSuccessCount.set(0);
                     recordMetrics();
                     return true;
