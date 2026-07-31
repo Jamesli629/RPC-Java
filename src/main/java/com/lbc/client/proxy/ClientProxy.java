@@ -110,6 +110,10 @@ public class ClientProxy implements InvocationHandler {
         }
         if (response.getCode() == 500) {
             circuitBreaker.recordFailure();
+            // 记录远端异常信息，便于排障（向后兼容，不改变返回 null 的行为）
+            if (response.getExceptionClass() != null) {
+                logger.warn("远端服务异常: {} - {}", response.getExceptionClass(), response.getExceptionMessage());
+            }
         }
     }
 

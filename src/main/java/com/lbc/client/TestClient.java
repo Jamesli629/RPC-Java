@@ -16,11 +16,20 @@ public class TestClient {
 //        ClientProxy clientProxy = new ClientProxy(host, port);
         UserService proxy = clientProxy.getProxy(UserService.class);
 
-        User user = proxy.getUserByUserId(1);
-        System.out.println("从服务端得到的user=" + user.toString());
+        try {
+            User user = proxy.getUserByUserId(1);
+            if (user != null) {
+                System.out.println("从服务端得到的user=" + user);
+            } else {
+                System.out.println("查询结果为空");
+            }
 
-        User u = User.builder().id(100).userName("wxx").sex(true).build();
-        Integer id = proxy.insertUserId(u);
-        System.out.println("向服务端插入user的id" + id);
+            User u = User.builder().id(100).userName("wxx").sex(true).build();
+            Integer id = proxy.insertUserId(u);
+            System.out.println("向服务端插入user的id: " + id);
+        } catch (Exception e) {
+            System.err.println("RPC 调用失败: " + e.getMessage());
+            System.err.println("请确认：1. ZooKeeper 已启动 2. TestServer 已启动");
+        }
     }
 }

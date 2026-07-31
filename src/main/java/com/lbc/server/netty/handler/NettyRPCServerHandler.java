@@ -87,9 +87,16 @@ public class NettyRPCServerHandler extends SimpleChannelInboundHandler<RpcReques
             //回传channelId，使客户端能匹配到对应的等待请求
             response.setChannelId(rpcRequest.getChannelId());
             return response;
-        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-            logger.error("方法执行错误，接口: {}, 方法: {}", interfaceName, rpcRequest.getMethodName(), e);
-            RpcResponse response = RpcResponse.fail();
+        } catch (InvocationTargetException e) {
+            // 业务方法抛出的真实异常，提取目标异常信息透传到客户端
+            Throwable target = e.getTargetException();
+            logger.error("方法执行异常，接口: {}, 方法: {}", interfaceName, rpcRequest.getMethodName(), target);
+            RpcResponse response = RpcResponse.failWithException(target);
+            response.setChannelId(rpcRequest.getChannelId());
+            return response;
+        } catch (NoSuchMethodException | IllegalAccessException e) {
+            logger.error("方法调用错误，接口: {}, 方法: {}", interfaceName, rpcRequest.getMethodName(), e);
+            RpcResponse response = RpcResponse.failWithException(e);
             response.setChannelId(rpcRequest.getChannelId());
             return response;
         }

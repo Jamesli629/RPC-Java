@@ -6,6 +6,8 @@ import com.lbc.common.serializer.mySerializer.JsonSerializer;
 import com.lbc.server.netty.handler.NettyRPCServerHandler;
 import com.lbc.server.provider.ServiceProvider;
 import com.lbc.server.server.impl.NettyRPCRPCServer;
+import com.lbc.common.config.ConfigManager;
+import com.lbc.server.netty.handler.BusinessThreadPoolHandler;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
@@ -17,6 +19,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * @author Lbc
  * @date 2024/09/16 15:55
+ *
+ * 服务端 Channel 初始化器，装配编解码链路、业务线程池和 RPC 处理器。
+ * BusinessThreadPoolHandler 将反射调用从 Netty IO 线程卸载到独立业务线程池。
  **/
 @AllArgsConstructor
 public class NettyServerInitializer extends ChannelInitializer<SocketChannel> {
@@ -31,6 +36,8 @@ public class NettyServerInitializer extends ChannelInitializer<SocketChannel> {
         //使用自定义的编/解码器
         pipeline.addLast(new MyEncoder(new JsonSerializer()));
         pipeline.addLast(new MyDecoder());
+        // 业务线程池：将 NettyRPCServerHandler 的反射调用从 IO 线程卸载
+        pipeline.addLast(new BusinessThreadPoolHandler());
         pipeline.addLast(new NettyRPCServerHandler(serviceProvider, server));
     }
 }

@@ -18,20 +18,24 @@ public class MyEncoder extends MessageToByteEncoder {
     private Serializer serializer;
     @Override
     protected void encode(ChannelHandlerContext ctx, Object msg, ByteBuf out) throws Exception {
-        //1.写入消息类型
+        //1.写入 Magic Number（协议起始标识）
+        out.writeShort(ProtocolConstants.MAGIC_NUMBER);
+        //2.写入协议版本
+        out.writeShort(ProtocolConstants.PROTOCOL_VERSION);
+        //3.写入消息类型
         if(msg instanceof RpcRequest){
             out.writeShort(MessageType.REQUEST.getCode());
         }
         else if(msg instanceof RpcResponse){
             out.writeShort(MessageType.RESPONSE.getCode());
         }
-        //2.写入序列化方式
+        //4.写入序列化方式
         out.writeShort(serializer.getType());
         //得到序列化数组
         byte[] serializeBytes = serializer.serialize(msg);
-        //3.写入长度
+        //5.写入长度
         out.writeInt(serializeBytes.length);
-        //4.写入请求/响应唯一标识channelId，用于连接池中匹配请求与响应
+        //6.写入请求/响应唯一标识channelId，用于连接池中匹配请求与响应
         int channelId = 0;
         if (msg instanceof RpcRequest) {
             channelId = ((RpcRequest) msg).getChannelId();

@@ -7,29 +7,55 @@ import com.lbc.common.serializer.mySerializer.Serializer;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.ByteToMessageDecoder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 
 /**
  * @author Lbc
  * @date 2024/09/21 10:18
+ *
+ * 协议帧格式（16 字节头）：
+ * magicNumber(2) + version(2) + messageType(2) + serializerType(2) + length(4) + channelId(4)
  **/
 public class MyDecoder extends ByteToMessageDecoder {
-    // messageType(2) + serializerType(2) + length(4) + channelId(4) = 12
-    private static final int HEADER_LENGTH = 12;
+    private static final Logger logger = LoggerFactory.getLogger(MyDecoder.class);
 
     @Override
     protected void decode(ChannelHandlerContext channelHandlerContext, ByteBuf in, List<Object> out) throws Exception {
         // Wait until full header arrives.
-        if (in.readableBytes() < HEADER_LENGTH) {
+        if (in.readableBytes() < ProtocolConstants.HEADER_LENGTH) {
             return;
         }
         in.markReaderIndex();
 
+        // 校验 Magic Number，不匹配则关闭连接（非法连接/协议错误）
+        short magicNumber = in.readShort();
+        if (magicNumber != ProtocolConstants.MAGIC_NUMBER) {
+            logger.warn("非法协议连接，Magic Number=0x{}，期望=0x{}，远程地址: {}",
+                    Integer.toHexString(magicNumber & 0xFFFF),
+                    Integer.toHexString(ProtocolConstants.MAGIC_NUMBER & 0xFFFF),
+                    channelHandlerContext.channel().remoteAddress());
+            channelHandlerContext.close();
+            return;
+        }
+
+        // 校验协议版本，不支持的版本直接拒绝
+        short version = in.readShort();
+        if (version > ProtocolConstants.MAX_PROTOCOL_VERSION) {
+            logger.warn("不支持的协议版本: {}，最大支持版本: {}，远程地址: {}",
+                    version, ProtocolConstants.MAX_PROTOCOL_VERSION,
+                    channelHandlerContext.channel().remoteAddress());
+            channelHandlerContext.close();
+            return;
+        }
+
         short messageType = in.readShort();
         if (messageType != MessageType.REQUEST.getCode() &&
                 messageType != MessageType.RESPONSE.getCode()) {
-            System.out.println("Unsupported message type");
+            logger.warn("不支持的消息类型: {}，远程地址: {}", messageType,
+                    channelHandlerContext.channel().remoteAddress());
             return;
         }
 

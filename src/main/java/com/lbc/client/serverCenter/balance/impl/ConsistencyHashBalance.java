@@ -2,6 +2,8 @@ package com.lbc.client.serverCenter.balance.impl;
 
 import com.lbc.client.serverCenter.balance.LoadBalance;
 import com.lbc.common.config.ConfigManager;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 
@@ -11,6 +13,8 @@ import java.util.*;
  * 一致性哈希算法 负载均衡，虚拟节点数从配置读取
  **/
 public class ConsistencyHashBalance implements LoadBalance {
+    private static final Logger logger = LoggerFactory.getLogger(ConsistencyHashBalance.class);
+
     // 虚拟节点的个数，从配置读取
     private final int virtualNum;
 
@@ -66,12 +70,12 @@ public class ConsistencyHashBalance implements LoadBalance {
 
         if (!realNodes.contains(node)) {
             realNodes.add(node);
-            System.out.println("真实节点[" + node + "] 上线添加");
+            logger.info("一致性哈希：真实节点[{}] 上线添加", node);
             for (int i = 0; i < virtualNum; i++) {
                 String virtualNode = node + "&&VN" + i;
                 int hash = getHash(virtualNode);
                 shards.put(hash, virtualNode);
-                System.out.println("虚拟节点[" + virtualNode + "] hash:" + hash + "，被添加");
+                logger.debug("一致性哈希：虚拟节点[{}] hash:{}", virtualNode, hash);
             }
         }
 
@@ -86,12 +90,12 @@ public class ConsistencyHashBalance implements LoadBalance {
     public void delNode(String node) {
         if (realNodes.contains(node)) {
             realNodes.remove(node);
-            System.out.println("真实节点[" + node + "] 下线移除");
+            logger.info("一致性哈希：真实节点[{}] 下线移除", node);
             for (int i = 0; i < virtualNum; i++) {
                 String virtualNode = node + "&&VN" + i;
                 int hash = getHash(virtualNode);
                 shards.remove(hash);
-                System.out.println("虚拟节点[" + virtualNode + "] hash:" + hash + "，被移除");
+                logger.debug("一致性哈希：虚拟节点[{}] hash:{}", virtualNode, hash);
             }
         }
     }

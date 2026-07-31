@@ -48,6 +48,8 @@ public class NettyRPCRPCServer implements RpcServer {
         bossGroup = new NioEventLoopGroup();
         workGroup = new NioEventLoopGroup();
         running = true;
+        // 注册 JVM 关闭钩子，SIGTERM/SIGINT 时自动触发优雅下线
+        registerShutdownHook();
         logger.info("netty服务端启动了，端口: {}", port);
         try {
             ServerBootstrap serverBootstrap = new ServerBootstrap();
@@ -118,6 +120,17 @@ public class NettyRPCRPCServer implements RpcServer {
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    /**
+     * 注册 JVM 关闭钩子，确保 SIGTERM/SIGINT 时自动触发优雅下线。
+     * 防止进程被直接 kill 导致 ZK 节点残留、在途请求丢失。
+     */
+    private void registerShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            logger.info("收到 JVM 关闭信号，开始优雅下线...");
+            stop();
+        }, "rpc-shutdown-hook"));
     }
 
     /**

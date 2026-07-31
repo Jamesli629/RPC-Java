@@ -93,7 +93,8 @@ public class NettyRpcClient implements RpcClient {
 
     /**
      * 同步发送请求（向后兼容）
-     * 内部委托给异步方法，通过 join() 阻塞等待结果
+     * 内部委托给异步方法，通过 join() 阻塞等待结果。
+     * 若调用失败（服务不可用、超时等），抛出明确的异常，避免上层得到 null 后产生无意义的 NPE。
      */
     @Override
     public RpcResponse sendRequest(RpcRequest request) {
@@ -101,7 +102,12 @@ public class NettyRpcClient implements RpcClient {
             return sendRequestAsync(request).join();
         } catch (Exception e) {
             logger.error("同步发送请求失败，channelId={}", request.getChannelId(), e);
-            return null;
+            // 提取根因，抛出明确的异常信息
+            Throwable cause = e;
+            if (e.getCause() != null) {
+                cause = e.getCause();
+            }
+            throw new RuntimeException("RPC 调用失败: " + cause.getMessage(), cause);
         }
     }
 
@@ -152,15 +158,28 @@ public class NettyRpcClient implements RpcClient {
     }
 
     /**
-     * Channel异常关闭时调用，释放该Channel上所有等待中的请求。
+     * Channel 关闭时调用，根据远程地址清理缓存并释放等待中的请求。
+     *
+     * @param remoteAddress 断开的远程地址字符串
      */
-    public void handleChannelInactive(String serviceName) {
-        //从缓存中移除不活跃的连接，下次请求会重建
-        channelCache.remove(serviceName);
-        //释放所有等待中的 Future，避免永久阻塞直到超时
-        pendingFutures.forEach((id, future) -> {
-            future.completeExceptionally(new RuntimeException("连接已断开: " + serviceName));
+    public void handleChannelInactive(String remoteAddress) {
+        // 从 channelCache 中移除所有指向该地址的 Channel
+        channelCache.entrySet().removeIf(entry -> {
+            Channel ch = entry.getValue();
+            if (ch == null || !ch.isActive()) {
+                return true;
+            }
+            String addr = ch.remoteAddress() != null ? ch.remoteAddress().toString() : "";
+            return addr.contains(remoteAddress) || addr.equals(remoteAddress);
         });
-        pendingFutures.clear();
+        logger.info("清理断开的连接: {}", remoteAddress);
+        // 释放所有等待中的 Future，避免永久阻塞直到超时
+        if (!pendingFutures.isEmpty()) {
+            logger.warn("释放 {} 个等待中的请求", pendingFutures.size());
+            pendingFutures.forEach((id, future) -> {
+                future.completeExceptionally(new RuntimeException("连接已断开: " + remoteAddress));
+            });
+            pendingFutures.clear();
+        }
     }
 }

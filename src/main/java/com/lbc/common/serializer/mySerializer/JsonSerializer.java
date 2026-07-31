@@ -4,12 +4,16 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * @author Lbc
  * @date 2024/09/21 10:14
  **/
 public class JsonSerializer implements Serializer {
+    private static final Logger logger = LoggerFactory.getLogger(JsonSerializer.class);
+
     @Override
     public byte[] serialize(Object obj) {
         byte[] bytes = JSONObject.toJSONBytes(obj);
@@ -50,8 +54,8 @@ public class JsonSerializer implements Serializer {
                 obj = response;
                 break;
             default:
-                System.out.println("暂时不支持此种消息");
-                throw new RuntimeException();
+                logger.warn("暂时不支持此种消息类型: {}", messageType);
+                throw new RuntimeException("不支持的消息类型: " + messageType);
         }
         return obj;
     }
