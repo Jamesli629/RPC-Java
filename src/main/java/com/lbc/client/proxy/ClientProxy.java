@@ -59,8 +59,8 @@ public class ClientProxy implements InvocationHandler {
         CircuitBreaker circuitBreaker = circuitBreakerProvider.getCircuitBreaker(method.getName());
         //判断熔断器是否允许请求经过
         if (!circuitBreaker.allowRequest()) {
-            //这里可以针对熔断做特殊处理，返回特殊值
-            return null;
+            // 熔断时执行降级逻辑
+            return handleFallback(method);
         }
 
         // 根据方法返回类型选择同步或异步路径
@@ -112,6 +112,28 @@ public class ClientProxy implements InvocationHandler {
         // 记录客户端指标
         recordClientMetrics(request, response, response != null && response.getCode() == 200 ? "success" : "error");
         return response != null ? response.getData() : null;
+    }
+
+    /**
+     * 熔断降级处理
+     * 返回类型的默认值（null/0/false 等），避免 NPE
+     */
+    private Object handleFallback(Method method) {
+        logger.warn("熔断降级: {}.{}，返回默认值", method.getDeclaringClass().getName(), method.getName());
+        Class<?> returnType = method.getReturnType();
+        if (returnType == int.class || returnType == Integer.class) {
+            return 0;
+        } else if (returnType == long.class || returnType == Long.class) {
+            return 0L;
+        } else if (returnType == boolean.class || returnType == Boolean.class) {
+            return false;
+        } else if (returnType == double.class || returnType == Double.class) {
+            return 0.0;
+        } else if (returnType == void.class || returnType == Void.class) {
+            return null;
+        }
+        // 引用类型返回 null
+        return null;
     }
 
     /**
