@@ -58,12 +58,13 @@ mvn clean package
   - `retry/` — 基于 Guava Retrying 的重试，仅对 ZK 中 `CanRetry` 白名单里的服务生效
   - `cache/ServiceCache` — 服务地址本地缓存，减少对 ZK 的频繁查询
   - `netty/` — Netty 客户端引导与处理器：`NettyClientInitializer` 装配空闲检测 + 心跳（`ClientHeartbeatHandler`）+ 编解码 + 业务处理器，`NettyClientHandler` 将响应回调完成 Future
+  - `cluster/` — 集群容错策略：`Cluster` 接口 + `FailfastCluster`/`FailsafeCluster`/`ForkingCluster`/`BroadcastCluster` 实现，`ClusterInvoker` 策略入口
   - `exception/` — 自定义异常类
 
-### 协议帧格式（16 字节头）
+### 协议帧格式（20 字节头 + payload + CRC）
 
 ```
-| magicNumber (2B) | version (2B) | messageType (2B) | serializerType (2B) | length (4B) | channelId (4B) | payload (length B) |
+| magicNumber (2B) | version (2B) | messageType (2B) | serializerType (2B) | length (4B) | channelId (4B) | payload (length B) | crc32 (4B) |
 ```
 
 - `magicNumber` = `0xCAFE`（固定常量，不匹配则关闭连接）
@@ -76,6 +77,14 @@ mvn clean package
 ### 调用链路
 
 客户端接口调用 → `ClientProxy.invoke`（构建请求 → 熔断判断 → 重试判断 → 发送）→ `NettyRpcClient.sendRequest`（从 ZK 发现地址 → Netty 写出）→ 服务端 `NettyServerInitializer` 链路（IdleStateHandler → MyEncoder/MyDecoder → BusinessThreadPoolHandler → `NettyRPCServerHandler.channelRead0`（限流 → 从 `ServiceProvider` 取实例 → 反射调用 → 写回））→ 客户端 `NettyClientHandler` 接收响应回调完成 Future → `sendRequest` 阻塞取出返回。
+
+- **`common`** 新增：
+  - `metrics/` — 指标采集：`RpcMetrics` 基于 Micrometer 采集 QPS/RT/错误率/限流/熔断指标
+  - `spi/` — SPI 扩展：`SpiLoader` 基于 ServiceLoader 的可插拔机制
+
+- **`server`** 新增：
+  - `health/` — 健康检查：`HealthcheckServer` 提供 `/health` 和 `/ready` HTTP 端点
+  - `idempotency/` — 幂等保障：`IdempotencyChecker` 基于 ConcurrentHashMap + TTL 的去重检查
 
 ### 关键设计要点
 
