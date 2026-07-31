@@ -2,6 +2,7 @@ package com.lbc.client.proxy;
 
 import com.lbc.client.circuitBreaker.CircuitBreaker;
 import com.lbc.client.circuitBreaker.CircuitBreakerProvider;
+import com.lbc.client.cluster.ClusterInvoker;
 import com.lbc.client.retry.GuavaRetry;
 import com.lbc.client.rpcClient.RpcClient;
 import com.lbc.client.rpcClient.impl.NettyRpcClient;
@@ -27,12 +28,14 @@ public class ClientProxy implements InvocationHandler {
     private RpcClient rpcClient;
     private ServiceCenter serviceCenter;
     private CircuitBreakerProvider circuitBreakerProvider;
+    private ClusterInvoker clusterInvoker;
 
     public ClientProxy() {
         try {
             serviceCenter = new ZKServiceCenter();
             rpcClient = new NettyRpcClient(serviceCenter);
             circuitBreakerProvider = new CircuitBreakerProvider();
+            clusterInvoker = new ClusterInvoker(rpcClient);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("初始化ZK连接失败，ClientProxy构造中断", e);
