@@ -97,10 +97,17 @@ public class MyDecoder extends ByteToMessageDecoder {
             crc32.update(bytes);
             int expectedCrc = (int) crc32.getValue();
             if (receivedCrc != expectedCrc) {
+                String remoteAddr = "unknown";
+                try {
+                    if (channelHandlerContext != null && channelHandlerContext.channel() != null) {
+                        remoteAddr = String.valueOf(channelHandlerContext.channel().remoteAddress());
+                    }
+                } catch (Exception ignored) {
+                }
                 logger.warn("CRC 校验失败: 收到=0x{}, 期望=0x{}, 远程地址: {}",
                         Integer.toHexString(receivedCrc),
                         Integer.toHexString(expectedCrc),
-                        channelHandlerContext.channel().remoteAddress());
+                        remoteAddr);
                 return;
             }
         }
