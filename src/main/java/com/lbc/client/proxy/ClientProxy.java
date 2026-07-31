@@ -18,6 +18,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 @AllArgsConstructor
@@ -47,11 +48,13 @@ public class ClientProxy implements InvocationHandler {
     //jdk动态代理，每一次代理对象调用方法，都会经过此方法增强（反射获取request对象，socket发送到服务端）
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        //构建request
+        //构建request，生成幂等键（重试时保持相同 key）
         RpcRequest request = RpcRequest.builder()
                 .interfaceName(method.getDeclaringClass().getName())
                 .methodName(method.getName())
-                .params(args).paramsType(method.getParameterTypes()).build();
+                .params(args).paramsType(method.getParameterTypes())
+                .idempotencyKey(UUID.randomUUID().toString())
+                .build();
         //获取熔断器
         CircuitBreaker circuitBreaker = circuitBreakerProvider.getCircuitBreaker(method.getName());
         //判断熔断器是否允许请求经过

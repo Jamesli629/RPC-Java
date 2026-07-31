@@ -1,8 +1,10 @@
 package com.lbc.server.netty.handler;
 
+import com.lbc.common.config.ConfigManager;
 import com.lbc.common.message.RpcRequest;
 import com.lbc.common.message.RpcResponse;
 import com.lbc.common.metrics.RpcMetrics;
+import com.lbc.server.idempotency.IdempotencyChecker;
 import com.lbc.server.provider.ServiceProvider;
 import com.lbc.server.rateLimit.RateLimit;
 import com.lbc.server.server.impl.NettyRPCRPCServer;
@@ -25,10 +27,27 @@ public class NettyRPCServerHandler extends SimpleChannelInboundHandler<RpcReques
 
     private ServiceProvider serviceProvider;
     private NettyRPCRPCServer server;
+    private IdempotencyChecker idempotencyChecker;
 
     public NettyRPCServerHandler(ServiceProvider serviceProvider, NettyRPCRPCServer server) {
         this.serviceProvider = serviceProvider;
         this.server = server;
+        // 初始化幂等检查器
+        initIdempotencyChecker();
+    }
+
+    private void initIdempotencyChecker() {
+        try {
+            ConfigManager config = ConfigManager.getInstance();
+            boolean enabled = config.getBoolean("rpc.idempotency.enabled", true);
+            if (enabled) {
+                int ttlMinutes = config.getInt("rpc.idempotency.ttl-minutes", 5);
+                idempotencyChecker = new IdempotencyChecker(ttlMinutes);
+                logger.info("幂等检查器初始化完成，TTL={}分钟", ttlMinutes);
+            }
+        } catch (Exception e) {
+            logger.warn("幂等检查器初始化失败，已禁用", e);
+        }
     }
 
     @Override
@@ -50,8 +69,27 @@ public class NettyRPCServerHandler extends SimpleChannelInboundHandler<RpcReques
         long startTime = System.currentTimeMillis();
 
         try {
+            // 幂等检查：如果是重复请求，直接返回缓存结果
+            if (idempotencyChecker != null && request.getIdempotencyKey() != null) {
+                Object cached = idempotencyChecker.checkAndRecord(
+                        request.getIdempotencyKey(), null);
+                if (cached != null) {
+                    RpcResponse cachedResponse = (RpcResponse) cached;
+                    cachedResponse.setChannelId(request.getChannelId());
+                    ctx.writeAndFlush(cachedResponse);
+                    logger.info("幂等命中，返回缓存结果，key={}", request.getIdempotencyKey());
+                    return;
+                }
+            }
+
             //接收request，读取并调用服务
             RpcResponse response = getResponse(request);
+
+            // 幂等记录：缓存首次调用的结果
+            if (idempotencyChecker != null && request.getIdempotencyKey() != null) {
+                idempotencyChecker.checkAndRecord(request.getIdempotencyKey(), response);
+            }
+
             // 不复用连接时不关闭通道，支持连接复用
             ctx.writeAndFlush(response);
 
