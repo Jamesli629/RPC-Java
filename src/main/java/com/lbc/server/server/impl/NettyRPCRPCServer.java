@@ -1,8 +1,11 @@
 package com.lbc.server.server.impl;
 
+import com.lbc.server.health.HealthStatus;
+import com.lbc.server.health.HealthcheckServer;
 import com.lbc.server.netty.nettyInitializer.NettyServerInitializer;
 import com.lbc.server.provider.ServiceProvider;
 import com.lbc.server.server.RpcServer;
+import com.lbc.common.config.ConfigManager;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -27,6 +30,9 @@ public class NettyRPCRPCServer implements RpcServer {
 
     private ServiceProvider serviceProvider;
 
+    // 健康检查 HTTP 服务（独立端口）
+    private HealthcheckServer healthcheckServer;
+
     // 提升为实例变量，stop() 可引用
     private NioEventLoopGroup bossGroup;
     private NioEventLoopGroup workGroup;
@@ -50,6 +56,8 @@ public class NettyRPCRPCServer implements RpcServer {
         running = true;
         // 注册 JVM 关闭钩子，SIGTERM/SIGINT 时自动触发优雅下线
         registerShutdownHook();
+        // 启动健康检查 HTTP 服务
+        startHealthcheck(port);
         logger.info("netty服务端启动了，端口: {}", port);
         try {
             ServerBootstrap serverBootstrap = new ServerBootstrap();
@@ -103,7 +111,12 @@ public class NettyRPCRPCServer implements RpcServer {
             logger.info("所有在途请求已完成");
         }
 
-        // ④ 关闭 Netty 资源
+        // ④ 停止健康检查服务
+        if (healthcheckServer != null) {
+            healthcheckServer.stop();
+        }
+
+        // ⑤ 关闭 Netty 资源
         if (channelFuture != null) {
             channelFuture.channel().close();
         }
@@ -120,6 +133,30 @@ public class NettyRPCRPCServer implements RpcServer {
     @Override
     public boolean isRunning() {
         return running;
+    }
+
+    /**
+     * 启动健康检查 HTTP 服务（独立于 RPC 端口）
+     */
+    private void startHealthcheck(int rpcPort) {
+        try {
+            ConfigManager config = ConfigManager.getInstance();
+            int healthPort = config.getInt("rpc.server.health-check.port", rpcPort + 1000);
+            healthcheckServer = new HealthcheckServer(healthPort, () -> {
+                // Readiness 判断：运行中且未处于排空状态则就绪
+                if (!running) {
+                    return HealthStatus.DOWN;
+                }
+                if (draining) {
+                    return HealthStatus.DOWN;
+                }
+                return HealthStatus.UP;
+            });
+            // 在独立线程中启动，避免阻塞 RPC 服务线程
+            new Thread(healthcheckServer::start, "healthcheck-server").start();
+        } catch (Exception e) {
+            logger.warn("健康检查服务启动失败（不影响 RPC 服务）", e);
+        }
     }
 
     /**
